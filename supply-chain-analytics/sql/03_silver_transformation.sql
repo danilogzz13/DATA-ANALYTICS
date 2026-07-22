@@ -88,7 +88,7 @@ WHERE CDC_TIMESTAMP >
 );
 
 -- ============================================================================
--- SILVER - SHIPMENTS | INCREMENTAL LOAD
+-- SILVER - TRANSPORTATION | INCREMENTAL LOAD
 -- ============================================================================
 
 %sql
