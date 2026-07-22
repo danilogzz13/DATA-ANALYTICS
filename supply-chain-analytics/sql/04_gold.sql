@@ -143,12 +143,10 @@ VALUES (
 );
 
 -- ============================================================================
--- SHIPMENTS | INCREMENTAL LOAD
+-- TRANSPORTATION | INCREMENTAL LOAD
 -- ============================================================================
-
-%sql
-MERGE INTO SUPPLY_CHAIN.GOLD.FACT_SHIPMENTS AS T
-USING SUPPLY_CHAIN.SILVER.SHIPMENTS AS S
+MERGE INTO SUPPLY_CHAIN.GOLD.FACT_TRANSPORTATION AS T
+USING SUPPLY_CHAIN.SILVER.TRANSPORTATION AS S
 ON T.SHIPMENT_ID = S.SHIPMENT_ID
 WHEN MATCHED
 THEN UPDATE SET
@@ -197,7 +195,6 @@ VALUES (
     CURRENT_TIMESTAMP(),
     NULL
 );
-
 -- ============================================================================
 -- CUSTOMER | FULL LOAD
 -- ============================================================================
@@ -278,3 +275,130 @@ VALUES (
     CURRENT_TIMESTAMP(),
     NULL
 );
+
+-- ============================================================================
+-- COST ANALYSIS
+-- ============================================================================
+
+%sql
+INSERT INTO SUPPLY_CHAIN.GOLD.FACT_COST_ANALYSIS
+SELECT
+    P.PO_ID,
+    P.PO_LINE_ID,
+    P.VENDOR_ID,
+    V.VENDOR_NAME,
+    P.MATERIAL_ID,
+    M.MATERIAL_DESC,
+    P.PLANT,
+    P.ORDER_QTY,
+    P.RECEIVED_QTY,
+    P.UNIT_PRICE,
+
+    P.ORDER_QTY * P.UNIT_PRICE AS MATERIAL_COST,
+
+    COALESCE(T.FREIGHT_COST,0) AS FREIGHT_COST,
+
+    P.ORDER_QTY * P.UNIT_PRICE
+        + COALESCE(T.FREIGHT_COST,0) AS LANDED_COST,
+
+    CURRENT_TIMESTAMP() AS CREATED_DATE
+
+FROM SUPPLY_CHAIN.GOLD.FACT_PROCUREMENT P
+
+LEFT JOIN SUPPLY_CHAIN.GOLD.DIM_VENDOR V
+    ON P.VENDOR_ID = V.VENDOR_ID
+
+LEFT JOIN SUPPLY_CHAIN.GOLD.DIM_MATERIAL M
+    ON P.MATERIAL_ID = M.MATERIAL_ID
+
+LEFT JOIN SUPPLY_CHAIN.GOLD.FACT_TRANSPORTATION T
+    ON P.PO_ID = T.PO_ID;
+
+-- ============================================================================
+-- BUSINESS IMPACT
+-- ============================================================================
+
+%sql
+INSERT INTO SUPPLY_CHAIN.GOLD.FACT_BUSINESS_IMPACT
+
+WITH COST_BY_MATERIAL_PLANT AS
+(
+    SELECT
+        MATERIAL_ID,
+        PLANT,
+
+        SUM(MATERIAL_COST) / NULLIF(SUM(ORDER_QTY),0) AS MATERIAL_UNIT_COST,
+        SUM(FREIGHT_COST) / NULLIF(SUM(ORDER_QTY),0) AS FREIGHT_UNIT_COST,
+        SUM(LANDED_COST) / NULLIF(SUM(ORDER_QTY),0) AS LANDED_UNIT_COST
+
+    FROM SUPPLY_CHAIN.GOLD.FACT_COST_ANALYSIS
+
+    WHERE ORDER_QTY > 0
+
+    GROUP BY
+        MATERIAL_ID,
+        PLANT
+)
+
+SELECT
+    S.SALES_ORDER_ID,
+    S.SALES_LINE_ID,
+
+    S.CUSTOMER_ID,
+    C.CUSTOMER_NAME,
+    C.CHANNEL,
+
+    S.MATERIAL_ID,
+    M.MATERIAL_DESC,
+
+    S.PLANT,
+    S.ORDER_DATE,
+
+    S.QUANTITY,
+
+    S.SALES_AMOUNT AS SALES_REVENUE,
+
+    ROUND(
+        S.QUANTITY * COALESCE(CA.MATERIAL_UNIT_COST,0),
+        2
+    ) AS MATERIAL_COST,
+
+    ROUND(
+        S.QUANTITY * COALESCE(CA.FREIGHT_UNIT_COST,0),
+        2
+    ) AS FREIGHT_COST,
+
+    ROUND(
+        S.QUANTITY * COALESCE(CA.LANDED_UNIT_COST,0),
+        2
+    ) AS LANDED_COST,
+
+    ROUND(
+        S.SALES_AMOUNT
+        - S.QUANTITY * COALESCE(CA.LANDED_UNIT_COST,0),
+        2
+    ) AS GROSS_MARGIN,
+
+    ROUND(
+        (
+            S.SALES_AMOUNT
+            - S.QUANTITY * COALESCE(CA.LANDED_UNIT_COST,0)
+        )
+        / NULLIF(S.SALES_AMOUNT,0)
+        * 100,
+        2
+    ) AS MARGIN_PERCENT,
+
+    CURRENT_TIMESTAMP() AS CREATED_DATE
+
+FROM SUPPLY_CHAIN.GOLD.FACT_SALES S
+
+LEFT JOIN SUPPLY_CHAIN.GOLD.DIM_CUSTOMER C
+    ON S.CUSTOMER_ID = C.CUSTOMER_ID
+
+LEFT JOIN SUPPLY_CHAIN.GOLD.DIM_MATERIAL M
+    ON S.MATERIAL_ID = M.MATERIAL_ID
+
+LEFT JOIN COST_BY_MATERIAL_PLANT CA
+    ON S.MATERIAL_ID = CA.MATERIAL_ID
+    AND S.PLANT = CA.PLANT;
