@@ -56,7 +56,7 @@ FROM READ_FILES(
 );
 
 --====================================================
--- BRONZE - SHIPMENTS
+-- BRONZE - TRANSPORTATION
 --====================================================
 %sql
 INSERT INTO SUPPLY_CHAIN.BRONZE.TRANSPORTATION
