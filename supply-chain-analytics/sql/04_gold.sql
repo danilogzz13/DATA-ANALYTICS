@@ -1,0 +1,280 @@
+-- ============================================================================
+-- FILE: 04_gold.sql
+-- PROJECT: Supply Chain Analytics
+--
+-- DESCRIPTION:
+-- Builds and maintains the Gold-layer dimension and fact tables used by the
+-- analytical model.
+--
+-- PIPELINE ORDER:
+-- - MATERIAL: CDC
+-- - VENDOR: Full Load
+-- - PURCHASE_ORDERS: CDC
+-- - SHIPMENTS: Incremental Load
+-- - CUSTOMER: Full Load
+-- - SALES: CDC
+--
+-- TECHNOLOGIES:
+-- - Databricks SQL
+-- - Delta Lake
+-- - Unity Catalog
+-- ============================================================================
+
+-- ============================================================================
+-- MATERIAL | CDC
+-- ============================================================================
+
+%sql
+MERGE INTO SUPPLY_CHAIN.GOLD.DIM_MATERIAL AS T
+USING SUPPLY_CHAIN.SILVER.MATERIAL_CDC AS S
+ON T.MATERIAL_ID = S.MATERIAL_ID
+WHEN MATCHED
+AND S.CDC_OPERATION = 'U'
+THEN UPDATE SET
+    T.MATERIAL_DESC = S.MATERIAL_DESC,
+    T.VENDOR_ID = S.VENDOR_ID,
+    T.PRICE = S.PRICE,
+    T.STATUS = S.STATUS,
+    T.UPDATED_DATE = CURRENT_TIMESTAMP(),
+    T.ACTIVE_FLAG = 'Y',
+    T.DEACTIVATED_DATE = NULL
+WHEN MATCHED
+AND S.CDC_OPERATION = 'D'
+THEN UPDATE SET
+    T.ACTIVE_FLAG = 'N',
+    T.UPDATED_DATE = CURRENT_TIMESTAMP(),
+    T.DEACTIVATED_DATE = CURRENT_TIMESTAMP()
+WHEN NOT MATCHED
+AND S.CDC_OPERATION = 'I'
+THEN INSERT (
+    MATERIAL_ID,
+    MATERIAL_DESC,
+    VENDOR_ID,
+    PRICE,
+    STATUS,
+    ACTIVE_FLAG,
+    CREATED_DATE,
+    UPDATED_DATE,
+    DEACTIVATED_DATE
+)
+VALUES (
+    S.MATERIAL_ID,
+    S.MATERIAL_DESC,
+    S.VENDOR_ID,
+    S.PRICE,
+    S.STATUS,
+    'Y',
+    CURRENT_TIMESTAMP(),
+    NULL,
+    NULL
+);
+
+-- ============================================================================
+-- VENDOR | FULL LOAD
+-- ============================================================================
+
+%sql
+CREATE OR REPLACE TABLE SUPPLY_CHAIN.GOLD.DIM_VENDOR AS
+SELECT
+    VENDOR_ID,
+    VENDOR_NAME,
+    COUNTRY,
+    CITY,
+    VENDOR_GROUP,
+    PAYMENT_TERM,
+    STATUS
+FROM SUPPLY_CHAIN.SILVER.VENDOR;
+
+-- ============================================================================
+-- PURCHASE ORDERS | CDC
+-- ============================================================================
+
+%sql
+MERGE INTO SUPPLY_CHAIN.GOLD.FACT_PROCUREMENT AS T
+USING SUPPLY_CHAIN.SILVER.PURCHASE_ORDERS AS S
+ON T.PO_ID = S.PO_ID
+AND T.PO_LINE_ID = S.PO_LINE_ID
+WHEN MATCHED
+AND S.CDC_OPERATION = 'U'
+THEN UPDATE SET
+    T.VENDOR_ID = S.VENDOR_ID,
+    T.MATERIAL_ID = S.MATERIAL_ID,
+    T.PLANT = S.PLANT,
+    T.ORDER_QTY = S.ORDER_QTY,
+    T.RECEIVED_QTY = S.RECEIVED_QTY,
+    T.UNIT_PRICE = S.UNIT_PRICE,
+    T.ORDER_STATUS = S.ORDER_STATUS,
+    T.ACTIVE_FLAG = 'Y',
+    T.UPDATED_DATE = CURRENT_TIMESTAMP()
+WHEN MATCHED
+AND S.CDC_OPERATION = 'D'
+THEN UPDATE SET
+    T.ACTIVE_FLAG = 'N',
+    T.UPDATED_DATE = CURRENT_TIMESTAMP()
+WHEN NOT MATCHED
+AND S.CC_OPERATION = 'I'
+THEN INSERT (
+    PO_ID,
+    PO_LINE_ID,
+    VENDOR_ID,
+    MATERIAL_ID,
+    PLANT,
+    ORDER_QTY,
+    RECEIVED_QTY,
+    UNIT_PRICE,
+    ORDER_STATUS,
+    ACTIVE_FLAG,
+    CREATED_DATE,
+    UPDATED_DATE
+)
+VALUES (
+    S.PO_ID,
+    S.PO_LINE_ID,
+    S.VENDOR_ID,
+    S.MATERIAL_ID,
+    S.PLANT,
+    S.ORDER_QTY,
+    S.RECEIVED_QTY,
+    S.UNIT_PRICE,
+    S.ORDER_STATUS,
+    'Y',
+    CURRENT_TIMESTAMP(),
+    NULL
+);
+
+-- ============================================================================
+-- SHIPMENTS | INCREMENTAL LOAD
+-- ============================================================================
+
+%sql
+MERGE INTO SUPPLY_CHAIN.GOLD.FACT_SHIPMENTS AS T
+USING SUPPLY_CHAIN.SILVER.SHIPMENTS AS S
+ON T.SHIPMENT_ID = S.SHIPMENT_ID
+WHEN MATCHED
+THEN UPDATE SET
+    T.PO_ID = S.PO_ID,
+    T.VENDOR_ID = S.VENDOR_ID,
+    T.PLANT = S.PLANT,
+    T.INCOTERM = S.INCOTERM,
+    T.TRANSPORT_MODE = S.TRANSPORT_MODE,
+    T.CARRIER = S.CARRIER,
+    T.ORIGIN_COUNTRY = S.ORIGIN_COUNTRY,
+    T.DESTINATION_COUNTRY = S.DESTINATION_COUNTRY,
+    T.DISTANCE_KM = S.DISTANCE_KM,
+    T.FREIGHT_COST = S.FREIGHT_COST,
+    T.SHIPMENT_STATUS = S.SHIPMENT_STATUS,
+    T.UPDATED_DATE = CURRENT_TIMESTAMP()
+WHEN NOT MATCHED
+THEN INSERT (
+    SHIPMENT_ID,
+    PO_ID,
+    VENDOR_ID,
+    PLANT,
+    INCOTERM,
+    TRANSPORT_MODE,
+    CARRIER,
+    ORIGIN_COUNTRY,
+    DESTINATION_COUNTRY,
+    DISTANCE_KM,
+    FREIGHT_COST,
+    SHIPMENT_STATUS,
+    CREATED_DATE,
+    UPDATED_DATE
+)
+VALUES (
+    S.SHIPMENT_ID,
+    S.PO_ID,
+    S.VENDOR_ID,
+    S.PLANT,
+    S.INCOTERM,
+    S.TRANSPORT_MODE,
+    S.CARRIER,
+    S.ORIGIN_COUNTRY,
+    S.DESTINATION_COUNTRY,
+    S.DISTANCE_KM,
+    S.FREIGHT_COST,
+    S.SHIPMENT_STATUS,
+    CURRENT_TIMESTAMP(),
+    NULL
+);
+
+-- ============================================================================
+-- CUSTOMER | FULL LOAD
+-- ============================================================================
+
+%sql
+CREATE OR REPLACE TABLE SUPPLY_CHAIN.GOLD.DIM_CUSTOMER AS
+SELECT
+    CUSTOMER_ID,
+    CUSTOMER_NAME,
+    CUSTOMER_GROUP,
+    COUNTRY,
+    CITY,
+    CHANNEL,
+    STATUS,
+    CURRENT_TIMESTAMP() AS CREATED_DATE,
+    NULL AS UPDATED_DATE
+FROM SUPPLY_CHAIN.SILVER.CUSTOMER;
+
+-- ============================================================================
+-- SALES | CDC
+-- ============================================================================
+
+%sql
+MERGE INTO SUPPLY_CHAIN.GOLD.FACT_SALES AS T
+USING SUPPLY_CHAIN.SILVER.SALES AS S
+ON T.SALES_ORDER_ID = S.SALES_ORDER_ID
+AND T.SALES_LINE_ID = S.SALES_LINE_ID
+WHEN MATCHED
+AND S.CDC_OPERATION = 'U'
+THEN UPDATE SET
+    T.CUSTOMER_ID = S.CUSTOMER_ID,
+    T.MATERIAL_ID = S.MATERIAL_ID,
+    T.PLANT = S.PLANT,
+    T.ORDER_DATE = S.ORDER_DATE,
+    T.QUANTITY = S.QUANTITY,
+    T.UNIT_PRICE = S.UNIT_PRICE,
+    T.DISCOUNT = S.DISCOUNT,
+    T.SALES_AMOUNT = S.SALES_AMOUNT,
+    T.STATUS = S.STATUS,
+    T.ACTIVE_FLAG = 'Y',
+    T.UPDATED_DATE = CURRENT_TIMESTAMP()
+WHEN MATCHED
+AND S.CDC_OPERATION = 'D'
+THEN UPDATE SET
+    T.ACTIVE_FLAG = 'N',
+    T.UPDATED_DATE = CURRENT_TIMESTAMP()
+WHEN NOT MATCHED
+AND S.CDC_OPERATION = 'I'
+THEN INSERT (
+    SALES_ORDER_ID,
+    SALES_LINE_ID,
+    CUSTOMER_ID,
+    MATERIAL_ID,
+    PLANT,
+    ORDER_DATE,
+    QUANTITY,
+    UNIT_PRICE,
+    DISCOUNT,
+    SALES_AMOUNT,
+    STATUS,
+    ACTIVE_FLAG,
+    CREATED_DATE,
+    UPDATED_DATE
+)
+VALUES (
+    S.SALES_ORDER_ID,
+    S.SALES_LINE_ID,
+    S.CUSTOMER_ID,
+    S.MATERIAL_ID,
+    S.PLANT,
+    S.ORDER_DATE,
+    S.QUANTITY,
+    S.UNIT_PRICE,
+    S.DISCOUNT,
+    S.SALES_AMOUNT,
+    S.STATUS,
+    'Y',
+    CURRENT_TIMESTAMP(),
+    NULL
+);
