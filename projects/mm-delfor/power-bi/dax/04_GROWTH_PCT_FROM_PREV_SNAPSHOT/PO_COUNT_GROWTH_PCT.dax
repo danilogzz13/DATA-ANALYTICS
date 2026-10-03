@@ -1,0 +1,2 @@
+PO_COUNT_GROWTH_PCT = DIVIDE([PO_COUNT]-[PO_COUNT_PREV_SNAPSHOT],
+                                    [PO_COUNT_PREV_SNAPSHOT])

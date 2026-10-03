@@ -1,0 +1,2 @@
+PO_VALUE_GROWTH_PCT = DIVIDE([TOTAL_PO_VALUE]-[PO_VALUE_PREV_SNAPSHOT],
+                                    [PO_VALUE_PREV_SNAPSHOT])

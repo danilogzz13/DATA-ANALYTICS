@@ -1,0 +1,2 @@
+PO_GR_QTY_GROWTH_PCT = DIVIDE([TOTAL_PO_GR_QTY]-[PO_GR_QTY_PREV_SNAPSHOT],
+                                    [PO_GR_QTY_PREV_SNAPSHOT])
