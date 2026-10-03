@@ -1,0 +1,2 @@
+AVG_OPEN_QTY_PER_SNAPSHOT = DIVIDE([TOTAL_PO_OPEN_QTY],
+                                                [SNAPSHOT_COUNT])
